@@ -8,11 +8,11 @@ import math
 import networkx as nx
 
 
-def is_zero_numeric(A, tol=1e-12):
+def is_zero_numeric(A, tol=1e-4):
     """Return True if the numeric matrix/vector is zero up to tol."""
     return np.linalg.norm(np.asarray(A, dtype=float)) <= tol
 
-def chop_matrix(B, tol=1e-12):
+def chop_matrix(B, tol=1e-4):
     """Return a SymPy matrix with tiny entries set to 0."""
     B = sp.Matrix(B)
     return B.applyfunc(lambda x: 0 if abs(float(x)) < tol else x)
