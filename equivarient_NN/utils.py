@@ -159,3 +159,50 @@ def activation_func_block(Q, D, byL, src_L, dst_L, activation_func,  test_vector
         B = chop_matrix(B, tol=1e-12)
         return B
     return cols
+
+
+# ------  Activation Functions  ------ #
+
+def RELU(x):
+    return np.maximum(x, 0)
+
+def ABS(x):
+    return np.abs(x)
+
+def GELU(x):
+    return 0.5 * x * (1.0 + erf(x / np.sqrt(2.0)))
+
+def LINEAR(x):
+    return x
+
+def BINARY(x):
+    return np.where(x >= 0, 1, 0)
+
+def SIGMOID(x):
+    return 1 / (1 + np.exp(-x))
+
+def TANH(x):
+    return np.tanh(x)
+
+def SOFTSIGN(x):
+    return x / (1 + np.abs(x))
+
+def SOFTPLUS(x):
+    return np.log1p(np.exp(x))
+
+def LEAKY_RELU(x):
+    return np.where(x > 0, x, 0.01 * x)
+
+def SILU(x):
+    return x / (1 + np.exp(-x))
+
+def ELISH(x):
+    return np.where(x < 0,
+                    (np.exp(x) - 1) / (1 + np.exp(-x)),
+                    x / (1 + np.exp(-x)))
+
+def GAUSSIAN(x):
+    return np.exp(-x**2)
+
+def SINUSOIDAL(x):
+    return np.sin(x)
