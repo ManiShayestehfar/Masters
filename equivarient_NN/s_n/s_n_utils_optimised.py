@@ -132,8 +132,13 @@ def build_interaction_graph(n, k, activation_fn, tol=1e-8, verbose=False):
     irreps = sorted([i for i, Q in Qblocks.items() if Q.shape[1] > 0])
     
     G = nx.DiGraph()
-    nodes = [(n-i, i) for i in irreps]
-    G.add_nodes_from(nodes)
+    for i in irreps:
+        # Calculate dimension: (n choose i) - (n choose i-1)
+        dim_i = math.comb(n, i) - (math.comb(n, i-1) if i > 0 else 0)
+        
+        # Add node with attribute
+        node_id = (n-i, i)
+        G.add_node(node_id, dimension=dim_i)
     
     # Only apply activation once per block to speed up checks
     # (Assuming activation_fn is element-wise numpy callable)
@@ -190,10 +195,16 @@ def grid_interaction_graph(N_list, k_list, activation_functions, tol=1e-6, save=
 
             # Draw
             nx.draw_networkx_nodes(G, pos, node_color="#E8F0FF", edgecolors="#3b82f6", 
-                                   node_size=800, ax=ax)
+                                   node_size=1000, ax=ax)
             
-            # Draw labels (reformatting tuple to string)
-            labels = {node: f"{node}" for node in G.nodes()}
+            # Create labels with Dimension included
+            labels = {}
+            for node in G.nodes(data=True):
+                node_id, attrs = node
+                dim = attrs.get('dimension', '?')
+                # Format: Partition on top, Dim below
+                # node_id is (n-i, i). We can just show the 'i' or the full tuple.
+                labels[node_id] = f"{node_id}\n$d={dim}$"
             nx.draw_networkx_labels(G, pos, labels=labels, font_size=8, 
                                     font_weight="bold", ax=ax)
                                     
