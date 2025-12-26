@@ -194,6 +194,7 @@ class InducedRepSolver:
         self.irrep_labels = []
 
     def set_subgroup(self, h_elements: List[Any]):
+        
         self.H_elements = h_elements
         
         H_indices = set()
