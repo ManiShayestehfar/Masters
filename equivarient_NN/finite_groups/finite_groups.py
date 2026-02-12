@@ -351,47 +351,92 @@ class InducedRepSolver:
             else:
                 self.Qblocks[label] = sp.Matrix() # Empty
 
-    def build_interaction_graph(self, activation_fn, verbose=False) -> nx.DiGraph:
+
+    def build_global_change_of_basis(self):
         """
-        Build interaction graph using exact symbolic checks.
-        activation_fn must handle SymPy expressions (e.g., use sp.Max(0, x)).
+        Build global square change-of-basis matrix Q whose columns are
+        the concatenated isotypic bases.
         """
+        blocks = []
+        self._ordered_labels = []
+
+        for label in self.irrep_labels:
+            Q_block = self.Qblocks.get(label)
+            if Q_block is not None and Q_block.shape[1] > 0:
+                blocks.append(Q_block)
+                self._ordered_labels.append(label)
+
+        if not blocks:
+            raise RuntimeError("No nonzero isotypic components found.")
+
+        Q = sp.Matrix.hstack(*blocks)
+
+        if Q.shape[0] != Q.shape[1]:
+            raise RuntimeError(f"Global Q not square: shape {Q.shape}")
+
+        self.Q_global = Q
+        self.Q_global_inv = Q.inv()
+
+
+    def build_interaction_graph(self, activation_fn, trials=25, verbose=False) -> nx.DiGraph:
+        """
+        Interaction graph for the map:
+            v in V[alpha]  ->  P_beta( activation_fn applied entrywise to v )
+        where V[alpha] are isotypic components obtained from central idempotents.
+
+        activation_fn must accept a SymPy expression and return a SymPy expression,
+        e.g. lambda x: sp.Max(0, x).
+        """
+
         present_labels = [L for L, Q in self.Qblocks.items() if Q.shape[1] > 0]
-        
+
         if verbose:
             print("Irreps present:", present_labels)
 
         G_graph = nx.DiGraph()
         G_graph.add_nodes_from(present_labels)
-        
-        def test_edge(L_src, L_dst):
+
+        def is_nonzero_matrix(M: sp.Matrix) -> bool:
+            # robust test: simplify each entry; if any is provably nonzero, return True
+            for entry in M:
+                if sp.simplify(entry) != 0:
+                    return True
+            return False
+
+        def random_generic_in_span(Q_src: sp.Matrix) -> sp.Matrix:
+            """
+            Produce a generic vector in span(Q_src) as a random integer combination
+            of its columns. This avoids 'degenerate' basis vectors.
+            """
+            d = Q_src.shape[1]
+            coeffs = [sp.Integer(np.random.randint(-3, 4)) for _ in range(d)]
+            if all(c == 0 for c in coeffs):
+                coeffs[0] = sp.Integer(1)
+            return Q_src * sp.Matrix(coeffs)
+
+        def test_edge(L_src, L_dst) -> bool:
             Q_src = self.Qblocks[L_src]
-            Q_dst = self.Qblocks[L_dst]
-            
-            # Check single basis vectors
-            for a in range(Q_src.shape[1]):
-                v = Q_src.col(a)
+            P_dst = self.projectors[L_dst]
+
+            for _ in range(trials):
+                # v is in the source isotypic component (permutation/coset coordinates)
+                v = random_generic_in_span(Q_src)
+
+                # Apply activation entrywise in permutation basis
                 v_act = v.applyfunc(activation_fn)
-                
-                P_dst = self.projectors[L_dst]
+
+                # Project to destination isotypic component
                 projected = P_dst * v_act
-                
-                if not projected.is_zero_matrix:
-                     return True
-            
-            # Check sums of pairs
-            for a in range(Q_src.shape[1]):
-                for b in range(a+1, Q_src.shape[1]):
-                    v = Q_src.col(a) + Q_src.col(b)
-                    v_act = v.applyfunc(activation_fn)
-                    projected = self.projectors[L_dst] * v_act
-                    if not projected.is_zero_matrix:
-                        return True
+
+                if is_nonzero_matrix(projected):
+                    return True
+
             return False
 
         for src in present_labels:
             for dst in present_labels:
                 if test_edge(src, dst):
                     G_graph.add_edge(src, dst)
-                    
+
         return G_graph
+
