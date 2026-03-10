@@ -27,11 +27,12 @@ class FiniteGroup:
     by generating internal keys.
     """
     def __init__(self, elements: List[Any], mult_func: Callable[[Any, Any], Any], 
-                 classes: Optional[List[Tuple[Any, List[Any]]]] = None):
+                 classes: Optional[List[Tuple[Any, List[Any]]]] = None, verbose: bool = False):
         self.elements = elements
         self.mult_func = mult_func
         self.n = len(elements)
-        
+        self.verbose = verbose
+
         # 1. Setup Key Strategy for Hashability
         if self.n > 0:
             sample = elements[0]
@@ -60,7 +61,7 @@ class FiniteGroup:
         # 3. Build Cayley Table (Multiplication Table)
         self.mult_table = np.zeros((self.n, self.n), dtype=int)
         
-        print(f"Building multiplication table for G (order {self.n})...")
+        if self.verbose: print(f"Building multiplication table for G (order {self.n})...")
         for i, e1 in enumerate(elements):
             for j, e2 in enumerate(elements):
                 prod = mult_func(e1, e2)
@@ -104,7 +105,7 @@ class FiniteGroup:
         
         # 6. Conjugacy Classes
         if classes is not None:
-            print("Using user-provided Conjugacy Classes.")
+            if self.verbose: print("Using user-provided Conjugacy Classes.")
             self.classes = []
             for idx, (rep, members) in enumerate(classes):
                 member_indices = set()
@@ -129,7 +130,7 @@ class FiniteGroup:
         
     def _discover_conjugacy_classes(self) -> List[ConjugacyClass]:
         """Compute conjugacy classes by brute force orbit calculation on indices."""
-        print("Discovering conjugacy classes...")
+        if self.verbose: print("Discovering conjugacy classes...")
         unseen = set(range(self.n))
         classes = []
         class_idx = 0

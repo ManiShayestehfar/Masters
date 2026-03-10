@@ -121,7 +121,7 @@ class InducedRepSolver:
                     char2 = [self.character_table[cls.index][j] for cls in self.G.classes]
                     
                     # Check if char2 is the exact complex conjugate of char1
-                    if all(sp.simplify(c1 - c2) == 0 for c1, c2 in zip(conj_char1, char2)):
+                    if all(sp.N(c1 - c2, chop=True) == 0 for c1, c2 in zip(conj_char1, char2)):
                         matched_idx = j
                         matched_label = label2
                         break
@@ -256,125 +256,189 @@ class InducedRepSolver:
                 Wmat * (Wmat.T * Wmat).inv() * Wmat.T
             )
 
-    def build_interaction_graph(self, activation_fn):
-        graph = nx.DiGraph()
-        labels = [L for L in self.Qblocks if self.Qblocks[L].shape[1] > 0]
-        graph.add_nodes_from(labels)
-
-        def nonzero(M):
-            return any(sp.simplify(x) != 0 for x in M)
-
-        for src in labels:
-            for dst in labels:
-                Q = self.Qblocks[src]
-                P = self.projectors[dst]
-
-                # test generic vectors in source space
-                for j in range(Q.shape[1]):
-                    v = Q.col(j)
-                    # v is now strictly real, so activation_fn executes cleanly
-                    v_act = v.applyfunc(activation_fn)
-                    proj = P * v_act
-
-                    if nonzero(proj):
-                        graph.add_edge(src, dst)
-                        break
-
-        return graph
-    
     def build_isotypic_graph(self, activation_fn):
-
         graph = nx.DiGraph()
 
         labels = [
             L for L in self.projectors
-            if self.projectors[L].rank() > 0
+            if self.Qblocks[L].shape[1] > 0
         ]
 
-        graph.add_nodes_from(labels)
+        # NEW: Store the dimension as a node attribute
+        for L in labels:
+            dim = self.Qblocks[L].shape[1]
+            graph.add_node(L, dim=dim)
 
         def nonzero(M):
-            return any(sp.simplify(x) != 0 for x in M)
+            return any(abs(sp.N(x)) > 1e-7 for x in M)
 
         for src in labels:
             P_src = self.projectors[src]
-
-            # basis for V[src]
             basis = P_src.columnspace()
-
             for dst in labels:
                 P_dst = self.projectors[dst]
-
                 for v in basis:
-
                     v_act = v.applyfunc(activation_fn)
-
                     if nonzero(P_dst * v_act):
-                        graph.add_edge(src, dst)
+                        graph.add_edge(src, dst, edge_type='activation')
                         break
+
+        kernels = {}
+        for L in labels:
+            first_irrep_label = L.split(" ⊕ ")[0]
+            idx = self.irrep_labels.index(first_irrep_label)
+            ker_L = set()
+            id_class = self.G.get_class_of(self.G.identity)
+            chi_e = self.character_table[id_class.index][idx]
+            for cls in self.G.classes:
+                chi_g = self.character_table[cls.index][idx]
+                if abs(sp.N(chi_g - chi_e)) < 1e-7:
+                    for member_idx in cls.member_indices:
+                        ker_L.add(member_idx)
+            kernels[L] = ker_L
+
+        for src in labels:
+            for dst in labels:
+                if src != dst and not graph.has_edge(src, dst):
+                    if kernels[src].issubset(kernels[dst]):
+                        graph.add_edge(src, dst, edge_type='kernel')
 
         return graph
 
-    def visualise_interaction_graph(self, graph: nx.DiGraph, node_size: int = 1800, activation_fn: Callable = None, group_name: str = "C3xS4"):
-        """
-        Visualises the interaction graph using networkx and matplotlib.
-        """
+    def build_interaction_graph(self, activation_fn):
+        graph = nx.DiGraph()
+        
+        nodes = [
+            node_key for node_key in self.copy_blocks 
+            if self.copy_blocks[node_key].shape[1] > 0
+        ]
+        
+        node_labels = {}
+        # NEW: Store the dimension as a node attribute
+        for node_key in nodes:
+            dim = self.copy_blocks[node_key].shape[1]
+            node_str = f"{node_key[0]} ({node_key[1] + 1})"
+            node_labels[node_key] = node_str
+            graph.add_node(node_str, dim=dim)
+
+        def nonzero(M):
+            return any(abs(sp.N(x)) > 1e-7 for x in M)
+
+        for src_key in nodes:
+            src_str = node_labels[src_key]
+            Q_src = self.copy_blocks[src_key]
+            for dst_key in nodes:
+                dst_str = node_labels[dst_key]
+                P_dst = self.copy_projectors[dst_key]
+                for j in range(Q_src.shape[1]):
+                    v = Q_src.col(j)
+                    v_act = v.applyfunc(activation_fn)
+                    proj = P_dst * v_act
+                    if nonzero(proj):
+                        graph.add_edge(src_str, dst_str, edge_type='activation')
+                        break
+
+        kernels = {}
+        for node_key in nodes:
+            label = node_key[0]
+            first_irrep_label = label.split(" ⊕ ")[0]
+            idx = self.irrep_labels.index(first_irrep_label)
+            ker = set()
+            id_class = self.G.get_class_of(self.G.identity)
+            chi_e = self.character_table[id_class.index][idx]
+            for cls in self.G.classes:
+                chi_g = self.character_table[cls.index][idx]
+                if abs(sp.N(chi_g - chi_e)) < 1e-7:
+                    for member_idx in cls.member_indices:
+                        ker.add(member_idx)
+            kernels[node_labels[node_key]] = ker
+
+        for src_str in graph.nodes:
+            for dst_str in graph.nodes:
+                if src_str != dst_str and not graph.has_edge(src_str, dst_str):
+                    if kernels[src_str].issubset(kernels[dst_str]):
+                        graph.add_edge(src_str, dst_str, edge_type='kernel')
+
+        return graph
+    
+
+    def visualise_interaction_graph(
+        self, 
+        graph: nx.DiGraph, 
+        node_size: int = 2500, 
+        font_size: int = 10, 
+        activation_fn: Callable = None, 
+        group_name: str = "C3xS4", 
+        show_kernel_inclusions: bool = True,
+        show_self_loops: bool = True # NEW: Toggle for self-loops
+    ):
         if len(graph.nodes) > 0:
-            plt.figure(figsize=(8, 8))
+            plt.figure(figsize=(10, 10))
             
-            # Using a circular layout evenly spaces the nodes, reducing jumbled intersections
-            pos = nx.circular_layout(graph)
+            # Compute Hasse diagram layout from high to low dimension
+            pos = {}
+            by_dim = {}
+            for node, data in graph.nodes(data=True):
+                dim = data.get('dim', 1)
+                if dim not in by_dim:
+                    by_dim[dim] = []
+                by_dim[dim].append(node)
+                
+            sorted_dims = sorted(by_dim.keys(), reverse=True)
+            for y_idx, dim in enumerate(sorted_dims):
+                layer_nodes = by_dim[dim]
+                n_nodes = len(layer_nodes)
+                xs = np.linspace(-1, 1, n_nodes) if n_nodes > 1 else [0.0]
+                for x, node in zip(xs, layer_nodes):
+                    pos[node] = np.array([x, -y_idx])
             
-            # Separate edges into categories for different styling
-            self_loops = [(u, v) for u, v in graph.edges() if u == v]
-            mutual_edges = [(u, v) for u, v in graph.edges() if u != v and graph.has_edge(v, u)]
-            one_way_edges = [(u, v) for u, v in graph.edges() if u != v and not graph.has_edge(v, u)]
+            display_labels = {n: f"{n}\ndim: {graph.nodes[n].get('dim', '?')}" for n in graph.nodes}
+
+            activation_edges = [(u, v) for u, v, d in graph.edges(data=True) if d.get('edge_type', 'activation') == 'activation']
+            kernel_edges = [(u, v) for u, v, d in graph.edges(data=True) if d.get('edge_type') == 'kernel']
             
-            # Draw nodes
+            if not show_kernel_inclusions:
+                kernel_edges = []
+            
+            self_loops = [(u, v) for u, v in activation_edges if u == v]
+            mutual_edges = [(u, v) for u, v in activation_edges if u != v and (v, u) in activation_edges]
+            one_way_edges = [(u, v) for u, v in activation_edges if u != v and (v, u) not in activation_edges]
+            
             nx.draw_networkx_nodes(
                 graph, pos, 
-                node_color="#E8F0FF", 
-                edgecolors="#2b6cb0", 
-                node_size=node_size,
+                node_color="#E8F0FF", edgecolors="#2b6cb0", node_size=node_size,
             )
             
-            # Draw labels
             nx.draw_networkx_labels(
                 graph, pos, 
-                font_size=12, 
-                font_weight="bold"
+                labels=display_labels,
+                font_size=font_size, font_weight="bold"
             )
             
-            # Draw one-way edges (curved, black)
+            # Straightened kernel edges (rad=0.0)
+            if kernel_edges:
+                nx.draw_networkx_edges(
+                    graph, pos, edgelist=kernel_edges, edge_color="red", 
+                    style="dotted", node_size=node_size, arrowsize=14,
+                    connectionstyle="arc3,rad=0.0", alpha=0.6 
+                )
+            # Straightened one-way edges (rad=0.0)
             if one_way_edges:
                 nx.draw_networkx_edges(
-                    graph, pos, 
-                    edgelist=one_way_edges, 
-                    edge_color="black", 
-                    node_size=1800,
-                    arrowsize=18,
-                    connectionstyle="arc3,rad=0.1"
+                    graph, pos, edgelist=one_way_edges, edge_color="black", 
+                    node_size=node_size, arrowsize=14, connectionstyle="arc3,rad=0.0"
                 )
-                
-            # Draw mutual edges (straight, dark blue, overlapping creates bidirectional arrows)
+            # Mutual edges retain a tiny curve (rad=0.1) so both directions are visible
             if mutual_edges:
                 nx.draw_networkx_edges(
-                    graph, pos, 
-                    edgelist=mutual_edges, 
-                    edge_color="darkblue", 
-                    node_size=1800,
-                    arrowsize=18,
-                    connectionstyle="arc3,rad=0.0"
+                    graph, pos, edgelist=mutual_edges, edge_color="darkblue", 
+                    node_size=node_size, arrowsize=14, connectionstyle="arc3,rad=0.1"
                 )
-                
-            # Draw self-loops
-            if self_loops:
+            # Self-loops conditionally rendered
+            if show_self_loops and self_loops:
                 nx.draw_networkx_edges(
-                    graph, pos, 
-                    edgelist=self_loops, 
-                    edge_color="black", 
-                    node_size=1800,
-                    arrowsize=18
+                    graph, pos, edgelist=self_loops, edge_color="black", 
+                    node_size=node_size, arrowsize=14
                 )
             
             title = group_name
@@ -382,6 +446,111 @@ class InducedRepSolver:
                 title += f" ({activation_fn.__name__})"
                 
             plt.title(title, fontsize=16, fontweight="bold", pad=20)
-            plt.axis("off")  # Turn off the surrounding axes frame
+            plt.axis("off")  
             plt.tight_layout()
             plt.show()
+
+    def visualise_interaction_grid(
+        self, 
+        graph: nx.DiGraph, 
+        ax, 
+        node_size: int = 2500, 
+        activation_fn=None, 
+        group_name: str = "C3xS4", 
+        show_kernel_inclusions: bool = True,
+        show_self_loops: bool = False # NEW: Toggle for self-loops
+    ):
+        if len(graph.nodes) == 0:
+            ax.axis("off")
+            return
+
+        pos = {}
+        by_dim = {}
+        for node, data in graph.nodes(data=True):
+            dim = data.get('dim', 1)
+            if dim not in by_dim:
+                by_dim[dim] = []
+            by_dim[dim].append(node)
+            
+        sorted_dims = sorted(by_dim.keys(), reverse=True)
+        for y_idx, dim in enumerate(sorted_dims):
+            layer_nodes = by_dim[dim]
+            n_nodes = len(layer_nodes)
+            xs = np.linspace(-1, 1, n_nodes) if n_nodes > 1 else [0.0]
+            for x, node in zip(xs, layer_nodes):
+                pos[node] = np.array([x, -y_idx])
+
+        activation_edges = [(u, v) for u, v, d in graph.edges(data=True) if d.get('edge_type', 'activation') == 'activation']
+        kernel_edges = [(u, v) for u, v, d in graph.edges(data=True) if d.get('edge_type') == 'kernel']
+        
+        if not show_kernel_inclusions:
+            kernel_edges = []
+
+        self_loops = [(u, v) for u, v in activation_edges if u == v]
+        mutual_edges = [(u, v) for u, v in activation_edges if u != v and (v, u) in activation_edges]
+        one_way_edges = [(u, v) for u, v in activation_edges if u != v and (v, u) not in activation_edges]
+
+        nx.draw_networkx_nodes(
+            graph, pos,
+            node_color="#E8F0FF", edgecolors="#2b6cb0", node_size=node_size, ax=ax
+        )
+
+        fig = ax.figure
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        node_radius_pts = np.sqrt(node_size / np.pi)
+
+        for node, (x, y) in pos.items():
+            dim = graph.nodes[node].get('dim', '?')
+            label = f"{node}\ndim: {dim}"
+            
+            fontsize = 1
+            text = ax.text(x, y, label, ha="center", va="center", fontsize=fontsize, fontweight="bold")
+
+            while True:
+                text.set_fontsize(fontsize)
+                bbox = text.get_window_extent(renderer=renderer)
+                width_pts = bbox.width * 72 / fig.dpi
+                height_pts = bbox.height * 72 / fig.dpi
+
+                if max(width_pts, height_pts) > 2 * node_radius_pts * 0.9:
+                    fontsize -= 1
+                    text.set_fontsize(fontsize)
+                    break
+                fontsize += 1
+
+        # Straightened kernel edges
+        if kernel_edges:
+            nx.draw_networkx_edges(
+                graph, pos, edgelist=kernel_edges, edge_color="red", style="dotted",
+                node_size=node_size, arrowsize=14, connectionstyle="arc3,rad=0.0",
+                alpha=0.6, ax=ax
+            )
+
+        # Straightened one-way edges
+        if one_way_edges:
+            nx.draw_networkx_edges(
+                graph, pos, edgelist=one_way_edges, edge_color="black",
+                node_size=node_size, arrowsize=14, connectionstyle="arc3,rad=0.0", ax=ax
+            )
+
+        # Mutual edges retain a tiny curve
+        if mutual_edges:
+            nx.draw_networkx_edges(
+                graph, pos, edgelist=mutual_edges, edge_color="darkblue",
+                node_size=node_size, arrowsize=14, connectionstyle="arc3,rad=0.1", ax=ax
+            )
+
+        # Conditionally render self-loops
+        if show_self_loops and self_loops:
+            nx.draw_networkx_edges(
+                graph, pos, edgelist=self_loops, edge_color="black",
+                node_size=node_size, arrowsize=14, ax=ax
+            )
+
+        title = group_name
+        if activation_fn is not None and hasattr(activation_fn, "__name__"):
+            title += f" ({activation_fn.__name__})"
+
+        ax.set_title(title, fontsize=14, fontweight="bold", pad=10)
+        ax.axis("off")
