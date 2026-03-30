@@ -370,10 +370,11 @@ class InducedRepSolver:
         activation_fn: Callable = None, 
         group_name: str = "C3xS4", 
         show_kernel_inclusions: bool = True,
-        show_self_loops: bool = True # NEW: Toggle for self-loops
+        show_self_loops: bool = True,
+        figsize: Tuple[int, int] = (10, 10),
     ):
         if len(graph.nodes) > 0:
-            plt.figure(figsize=(10, 10))
+            plt.figure(figsize=figsize)
             
             # Compute Hasse diagram layout from high to low dimension
             pos = {}
