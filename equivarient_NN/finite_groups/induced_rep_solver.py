@@ -283,12 +283,19 @@ class InducedRepSolver:
             rho_alpha = self.irrep_mats[label]
 
             # Precompute all (0,0) coefficients as complex numbers (|G| sp.N calls)
+            rho_alpha_np = {g: complex(sp.N(rho_alpha[g][0,0])) for g in rho_alpha}
+
             coeffs = np.array([
-                complex(sp.N(
-                    rho_alpha[self.G._key(self.G.elements[self.G.inv_table[g_idx]])][0, 0]
-                ))
+                rho_alpha_np[self.G._key(self.G.elements[self.G.inv_table[g_idx]])]
                 for g_idx in range(self.G.n)
             ], dtype=np.complex128)
+
+            # coeffs = np.array([
+            #     complex(sp.N(
+            #         rho_alpha[self.G._key(self.G.elements[self.G.inv_table[g_idx]])][0, 0]
+            #     ))
+            #     for g_idx in range(self.G.n)
+            # ], dtype=np.complex128)
 
             E11 = np.zeros((m, m), dtype=np.complex128)
             for g_idx, g in enumerate(self.G.elements):

@@ -49,7 +49,7 @@ def build_Sn(n):
 # 1. C_n irreps
 # ============================================================
 
-def irreps_mats_Cn(n):
+def irreps_mats_Cn(n, labels=None):
     """
     Returns
         irrep_mats[label][g] = SymPy matrix
@@ -60,7 +60,10 @@ def irreps_mats_Cn(n):
     out = {}
 
     for j in range(n):
-        label = rf"$\chi_{j}$"
+        if labels is not None:
+            label = labels[j]
+        else:
+            label = str(j)
         rho = {}
         for a in range(n):
             rho[a] = sp.Matrix([[sp.simplify(zeta ** (j * a))]])
@@ -327,7 +330,8 @@ def irreps_mats_Sn(n):
             for s in simple_generators:
                 h = mult(g, s)
                 if h not in rho:
-                    rho[h] = sp.simplify(rho[g] * gen_mats[s])
+                    # rho[h] = sp.simplify(rho[g] * gen_mats[s])
+                    rho[h] = rho[g] * gen_mats[s]
                     q.append(h)
 
         out[label] = rho
